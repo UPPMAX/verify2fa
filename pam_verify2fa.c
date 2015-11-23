@@ -48,7 +48,7 @@
 #include <stdio.h>
 
 #include <libintl.h>
-
+#include <stddef.h>
 #include <sys/types.h>
 #include <grp.h>
 
@@ -79,6 +79,88 @@ static struct {
   ENV_ITEM(PAM_RUSER),
 };
 
+
+/* Taken from http://creativeandcritical.net/str-replace-c (public domain) */
+
+char *repl_str(const char *str, const char *old, const char *new) {
+
+  /* Adjust each of the below values to suit your needs. */
+
+  /* Increment positions cache size initially by this number. */
+  size_t cache_sz_inc = 16;
+  /* Thereafter, each time capacity needs to be increased,
+   * multiply the increment by this factor. */
+  const size_t cache_sz_inc_factor = 3;
+  /* But never increment capacity by more than this number. */
+  const size_t cache_sz_inc_max = 1048576;
+
+  char *pret, *ret = NULL;
+  const char *pstr2, *pstr = str;
+  size_t i, count = 0;
+  ptrdiff_t *pos_cache = NULL;
+  size_t cache_sz = 0;
+  size_t cpylen, orglen, retlen, newlen, oldlen = strlen(old);
+
+  /* Find all matches and cache their positions. */
+  while ((pstr2 = strstr(pstr, old)) != NULL) {
+    count++;
+
+    /* Increase the cache size when necessary. */
+    if (cache_sz < count) {
+      cache_sz += cache_sz_inc;
+      pos_cache = realloc(pos_cache, sizeof(*pos_cache) * cache_sz);
+      if (pos_cache == NULL) {
+	goto end_repl_str;
+      }
+      cache_sz_inc *= cache_sz_inc_factor;
+      if (cache_sz_inc > cache_sz_inc_max) {
+	cache_sz_inc = cache_sz_inc_max;
+      }
+    }
+
+    pos_cache[count-1] = pstr2 - str;
+    pstr = pstr2 + oldlen;
+  }
+
+  orglen = pstr - str + strlen(pstr);
+
+  /* Allocate memory for the post-replacement string. */
+  if (count > 0) {
+    newlen = strlen(new);
+    retlen = orglen + (newlen - oldlen) * count;
+  } else retlen = orglen;
+  ret = malloc(retlen + 1);
+  if (ret == NULL) {
+    goto end_repl_str;
+  }
+
+  if (count == 0) {
+    /* If no matches, then just duplicate the string. */
+    strcpy(ret, str);
+  } else {
+    /* Otherwise, duplicate the string whilst performing
+     * the replacements using the position cache. */
+    pret = ret;
+    memcpy(pret, str, pos_cache[0]);
+    pret += pos_cache[0];
+    for (i = 0; i < count; i++) {
+      memcpy(pret, new, newlen);
+      pret += newlen;
+      pstr = str + pos_cache[i] + oldlen;
+      cpylen = (i == count-1 ? orglen : pos_cache[i+1]) - pos_cache[i] - oldlen;
+      memcpy(pret, pstr, cpylen);
+      pret += cpylen;
+    }
+    ret[retlen] = '\0';
+  }
+
+ end_repl_str:
+  /* Free the cache and return the post-replacement string,
+   * which will be NULL in the event of an error. */
+  free(pos_cache);
+  return ret;
+}
+
 #define _(str) gettext(str)
 
 static int
@@ -99,13 +181,23 @@ call (const char *pam_type, pam_handle_t *pamh,
   int tries=0;
 
   int ok = 0;
-  
+
+  const char* urlptr = NULL;
 
   
   for (optargc = 0; optargc < argc; optargc++)
     {
       if (strcasecmp (argv[optargc], "debug") == 0)
 	debug = 1;
+
+      if (strncasecmp (argv[optargc], "url=", 4) == 0)
+	urlptr = argv[optargc]+4;
+    }
+
+  if (!urlptr)
+    {
+      pam_info(pamh, "System is not open right now, sorry!\n"); 
+      return PAM_SYSTEM_ERR;     
     }
 
   pam_get_user(pamh, &me, NULL);
@@ -120,8 +212,10 @@ call (const char *pam_type, pam_handle_t *pamh,
     {
       CURL* easyh;
       int ret;
-      char* url = "https://www.uu.se/";
+      char* url = NULL;
+      char* tmps = NULL;
       long code;
+      int bufsize = 0;
       
       retval = pam_prompt (pamh, PAM_PROMPT_ECHO_ON,
 			   &resp, "%s", msg);
@@ -133,6 +227,16 @@ call (const char *pam_type, pam_handle_t *pamh,
 	    retval = PAM_INCOMPLETE;
 	  return retval;
 	}
+
+      tmps = repl_str(urlptr, "%USER%", me);
+      if (!tmps)
+	return PAM_BUF_ERR;
+
+      url = repl_str(tmps, "%FACTOR%", resp);
+      free (tmps);
+
+      if (!url)
+	return PAM_BUF_ERR;
 
       easyh = curl_easy_init();
 
