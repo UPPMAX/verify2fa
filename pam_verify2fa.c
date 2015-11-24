@@ -66,6 +66,7 @@
 #include <curl/curl.h>
 
 #define MAX_TRIES 4
+#define MAX_EXCLUDES 100
 
 #define ENV_ITEM(n) { (n), #n }
 static struct {
@@ -161,6 +162,9 @@ char *repl_str(const char *str, const char *old, const char *new) {
   return ret;
 }
 
+/* end of string replace implementation */
+
+
 #define _(str) gettext(str)
 
 static int
@@ -174,15 +178,18 @@ call (const char *pam_type, pam_handle_t *pamh,
   int use_stdout = 0;
   int optargc;
   int retval;
-  char* resp = NULL;
-  char* msg;
+
   const char* me;
   int i;
   int tries=0;
 
+  char* excludeptr = NULL;
+  char* excluded[MAX_EXCLUDES];
+
   int ok = 0;
 
   const char* urlptr = NULL;
+  excluded[0] = 0;
 
   
   for (optargc = 0; optargc < argc; optargc++)
@@ -192,18 +199,71 @@ call (const char *pam_type, pam_handle_t *pamh,
 
       if (strncasecmp (argv[optargc], "url=", 4) == 0)
 	urlptr = argv[optargc]+4;
+
+      if (strncasecmp (argv[optargc], "exclude=", 8) == 0)
+	{
+	  /* Make array of pointers to excluded usernames */
+	  int i = 0;
+	  int exlen = strlen(argv[optargc]+8)+1;
+	  excludeptr = alloca(exlen);
+	  strncpy(excludeptr, argv[optargc]+8, exlen);
+
+	  while (excludeptr && *excludeptr && i<MAX_EXCLUDES)
+	    excluded[i++] = strsep(&excludeptr, ",");
+
+	  /* Did we fill all slots? */
+	  if (i == MAX_EXCLUDES)
+	    {
+	      pam_syslog (pamh, LOG_WARNING, "Too many users excluded.");
+	      return PAM_SYSTEM_ERR;                
+	    }	
+	  else
+	    excluded[i] = NULL;
+
+	}
     }
 
+  /* URL parameter given? */
   if (!urlptr)
     {
+      pam_syslog (pamh, LOG_WARNING, "No URL given for verification.");
+
       pam_info(pamh, "System is not open right now, sorry!\n"); 
       return PAM_SYSTEM_ERR;     
     }
 
+  /* Get user */
   pam_get_user(pamh, &me, NULL);
 
-  msg = "Please give your OTP now: ";
+  if (!me)
+    {
+      pam_syslog (pamh, LOG_WARNING, "Failed to get user.");
+      return PAM_SYSTEM_ERR;
+    }
 
+  if (debug)
+    pam_syslog (pamh, LOG_DEBUG, "Checking 2FA for user %s", me);
+
+  /* White listed? */
+  i=0;
+
+  if (debug)
+    pam_syslog (pamh, LOG_DEBUG, "checking excludes.");
+  
+  while(excluded[i])
+    {
+      int len = strlen(excluded[i]);
+
+      if (debug)
+	pam_syslog (pamh, LOG_DEBUG, "exclude: %s", excluded[i]);
+
+      if (!strncasecmp(me, excluded[i++], len+1))
+	{
+	  pam_info(pamh, "\nYou are excluded from 2FA.\n", excluded[i-1], me);
+	  return PAM_SUCCESS;	  
+	}
+    }
+  
   if (debug)
     pam_syslog (pamh, LOG_DEBUG, "sending prompt.");
 
@@ -211,22 +271,31 @@ call (const char *pam_type, pam_handle_t *pamh,
   while(!ok && tries < MAX_TRIES)
     {
       CURL* easyh;
+      char* resp;
+      char* msg = "Please give your OTP now:";
       int ret;
       char* url = NULL;
       char* tmps = NULL;
       long code;
       int bufsize = 0;
-      
+
+      /* Prompt for and get string */
+
       retval = pam_prompt (pamh, PAM_PROMPT_ECHO_ON,
 			   &resp, "%s", msg);
-  
+     
       if (retval != PAM_SUCCESS)
 	{
+	  pam_syslog (pamh, LOG_WARNING, "pam_prompt failed while talking to %s.", me);
+	  
 	  _pam_drop (resp);
 	  if (retval == PAM_CONV_AGAIN)
 	    retval = PAM_INCOMPLETE;
 	  return retval;
 	}
+
+
+      tmps = resp;
 
       tmps = repl_str(urlptr, "%USER%", me);
       if (!tmps)
@@ -278,11 +347,17 @@ call (const char *pam_type, pam_handle_t *pamh,
 
   if ( ok )
     {
+      if (debug)
+	pam_syslog (pamh, LOG_DEBUG, "accepted authentication for %s.", me);
+
       pam_info(pamh, "\n\nThank you for authenticating.\n\n");
       return PAM_SUCCESS;
     }
   else
     {
+      if (debug)
+	pam_syslog (pamh, LOG_DEBUG, "failing authentication for %s.", me);
+
       pam_info(pamh, "Couldn't authenticate you, sorry!\n");
       return PAM_AUTH_ERR;
     }
