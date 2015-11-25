@@ -33,6 +33,13 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <ctype.h>
+
+
+#define MAX_TRIES 4
+#define MAX_EXCLUDES 100
+#define CODEVALIDFUNC(C) isalnum(C)
+
 #include <time.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -64,21 +71,6 @@
 
 
 #include <curl/curl.h>
-
-#define MAX_TRIES 4
-#define MAX_EXCLUDES 100
-
-#define ENV_ITEM(n) { (n), #n }
-static struct {
-  int item;
-  const char *name;
-} env_items[] = {
-  ENV_ITEM(PAM_SERVICE),
-  ENV_ITEM(PAM_USER),
-  ENV_ITEM(PAM_TTY),
-  ENV_ITEM(PAM_RHOST),
-  ENV_ITEM(PAM_RUSER),
-};
 
 
 /* Taken from http://creativeandcritical.net/str-replace-c (public domain) */
@@ -171,11 +163,8 @@ static int
 call (const char *pam_type, pam_handle_t *pamh,
 	   int argc, const char **argv)
 {
-  struct group* grp;
-  
+ 
   int debug = 0;
-  int quiet = 0;
-  int use_stdout = 0;
   int optargc;
   int retval;
 
@@ -259,7 +248,7 @@ call (const char *pam_type, pam_handle_t *pamh,
 
       if (!strncasecmp(me, excluded[i++], len+1))
 	{
-	  pam_info(pamh, "\nYou are excluded from 2FA.\n", excluded[i-1], me);
+	  pam_info(pamh, "\nYou are excluded from 2FA.\n");
 	  return PAM_SUCCESS;	  
 	}
     }
@@ -272,20 +261,21 @@ call (const char *pam_type, pam_handle_t *pamh,
     {
       CURL* easyh;
       char* resp;
-      char* msg = "Please give your OTP now:";
+      char* msg = "Please give your OTP now: ";
       int ret;
       char* url = NULL;
       char* tmps = NULL;
       long code;
-      int bufsize = 0;
 
       /* Prompt for and get string */
 
       retval = pam_prompt (pamh, PAM_PROMPT_ECHO_ON,
 			   &resp, "%s", msg);
      
-      if (retval != PAM_SUCCESS)
+      if (retval != PAM_SUCCESS || !resp)
 	{
+	  /* Failed, somehow */
+
 	  pam_syslog (pamh, LOG_WARNING, "pam_prompt failed while talking to %s.", me);
 	  
 	  _pam_drop (resp);
@@ -294,8 +284,14 @@ call (const char *pam_type, pam_handle_t *pamh,
 	  return retval;
 	}
 
-
       tmps = resp;
+      
+      while ( CODEVALIDFUNC(*tmps++))
+	{
+	}
+
+      *tmps = 0;
+
 
       tmps = repl_str(urlptr, "%USER%", me);
       if (!tmps)
