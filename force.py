@@ -68,6 +68,8 @@ while tried < allowedtries:
         print "Success, logging you in."
         syslog.syslog("Allowed %s after successfull verification." % me)
         allow()
+    else:
+        print "Verification failed, please try again."
 
 
 syslog.syslog("Failing %s after too many tries." % me)
