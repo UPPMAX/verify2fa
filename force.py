@@ -33,11 +33,17 @@ for p in sys.argv[1:]:
     if p[:8] == "exclude=":
         for q in p[8:].split(","):
             excluded.append(q)
-
-    
+   
 if me in excluded:
     syslog.syslog("Skipping 2FA because %s is excluded." % me)
     allow()
+
+
+if not url:
+    syslog.syslog("No URL given for verification, bailing out.")
+    sys.exit(1)
+
+
 
 tried = 0
 
