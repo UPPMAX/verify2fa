@@ -7,17 +7,18 @@ import syslog
 import os
 import subprocess
 import time
-
+import pwd
 
 gracetime = 10
 allowedtries = 3
 verifyfunction = lambda x: x.isalnum()
 
-me = os.getlogin()
+me =  pwd.getpwuid(os.geteuid()).pw_name
 url = None
 excluded = []
 gracename = None
 
+broker = None
 remote = None
 
 try:
@@ -34,7 +35,7 @@ except:
 
 syslog.openlog("verify2fa")
 
-def allow():
+def allow(excluded=False):
 
     try:
         if gracename:
@@ -46,18 +47,27 @@ def allow():
     except:
         pass
 
-    cmd = "/bin/bash -l"
+    if excluded and broker:
+        # Run broker instead and let that one launch
+        os.execvp(broker,(broker,))
+    else:
+        cmd = "/bin/bash -l"
 
-    if os.environ.has_key("SSH_ORIGINAL_COMMAND"):
-        cmd = os.environ['SSH_ORIGINAL_COMMAND']
-    ret = os.system(cmd)
-    sys.exit( ret )
+        if os.environ.has_key("SSH_ORIGINAL_COMMAND"):
+            cmd = os.environ['SSH_ORIGINAL_COMMAND']
+        ret = os.system(cmd)
+        sys.exit( ret )
+
+    # We should not be here
+    sys.exit(1)
    
 
 
 for p in sys.argv[1:]:
     if p[:6] == "--url=":
         url = p[6:]
+    if p[:9] == "--broker=":
+        broker = p[9:]
     if p[:10] == "--exclude=":
         for q in p[10:].split(","):
             excluded.append(q)
@@ -70,7 +80,7 @@ for p in sys.argv[1:]:
    
 if me in excluded:
     syslog.syslog("Skipping 2FA because %s is excluded." % me)
-    allow()
+    allow(True)
 
 
 if not url:
@@ -87,6 +97,8 @@ try:
             l = line.index(' ')
             if line[:l] == remote and time.time()-float(line[l:]) < gracetime*60:
                 allow()
+except SystemExit as e:
+    raise e
 except:
     pass
 
