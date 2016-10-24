@@ -17,6 +17,7 @@ me =  pwd.getpwuid(os.geteuid()).pw_name
 url = None
 excluded = []
 gracename = None
+homedir = None
 
 broker = None
 remote = None
@@ -28,10 +29,15 @@ except:
     pass
 
 try:
-    gracename = os.path.join(os.environ['HOME'], '.gracetimefile')
-except: 
+    homedir = pwd.getpwuid(os.geteuid()).pw_dir
+    os.environ['HOME'] = homedir
+except:
     pass
 
+try:
+    gracename = os.path.join(homedir, '.gracetimefile')      
+except: 
+    pass
 
 syslog.openlog("verify2fa")
 
