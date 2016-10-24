@@ -15,6 +15,7 @@ verifyfunction = lambda x: x.isalnum()
 
 me =  pwd.getpwuid(os.geteuid()).pw_name
 url = None
+newtokenurl = None
 excluded = []
 gracename = None
 homedir = None
@@ -72,6 +73,8 @@ def allow(excluded=False):
 for p in sys.argv[1:]:
     if p[:6] == "--url=":
         url = p[6:]
+    if p[:14] == "--newtokenurl=":
+        newtokenurl = p[14:]
     if p[:9] == "--broker=":
         broker = p[9:]
     if p[:10] == "--exclude=":
@@ -111,7 +114,16 @@ except:
 tried = 0
 
 while tried < allowedtries:
+  
+    if newtokenurl:
+        print
+        print "If you do not have a second factor, you can request one at"
+        print "%s" % newtokenurl
+        print
+
     print "Please enter your second factor: "
+
+
     factor = None
 
     while not factor:
