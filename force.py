@@ -1,10 +1,14 @@
 #!/usr/bin/env python
+#
+# This file comes from puppet.
+#
 
 import pwd
 import requests
 import sys
 import syslog
 import os
+import stat
 import subprocess
 import time
 import pwd
@@ -22,6 +26,8 @@ homedir = None
 
 broker = None
 remote = None
+
+extraoutput = None
 
 try:
     remote = os.environ['SSH_CLIENT']
@@ -84,6 +90,16 @@ for p in sys.argv[1:]:
         allowedtries=int(p[11:])
     if p[:12] == "--gracetime=":
         gracetime=int(p[12:])
+    if p[:15] == "--extra-output=":
+        try:
+            # Only care about files
+            tocheck = p[15:].strip()
+            
+            if stat.S_ISREG(os.stat(tocheck).st_mode):
+                extraoutput = tocheck
+            
+        except:
+            pass
 
 
    
@@ -114,14 +130,23 @@ except:
 tried = 0
 
 while tried < allowedtries:
-  
+    
+    if extraoutput:
+        try:
+            # Do not clobber the screen, send at most 16 Kbytes.
+            f = open(extraoutput, 'r')
+            sys.stdout.write(f.read(16384))
+            f.close()
+        except:
+            pass
+
     if newtokenurl:
         print
         print "If you do not have a second factor, you can request one at"
         print "%s" % newtokenurl
         print
 
-    print "Please enter your second factor: "
+    print "Please enter the current code from your second factor: "
 
 
     factor = None
