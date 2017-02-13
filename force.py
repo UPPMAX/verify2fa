@@ -135,16 +135,16 @@ while tried < allowedtries:
         try:
             # Do not clobber the screen, send at most 16 Kbytes.
             f = open(extraoutput, 'r')
-            sys.stdout.write(f.read(16384))
+            sys.stderr.write(f.read(16384))
             f.close()
         except:
             pass
 
     if newtokenurl:
-        print
-        print "If you do not have a second factor, you can request one at"
-        print "%s" % newtokenurl
-        print
+        sys.stderr.write("\n")
+        sys.stderr.write("If you do not have a second factor, you can request one at\n")
+        sys.stderr.write("%s\n" % newtokenurl)
+        sys.stderr.write("\n")
 
     print "Please enter the current code from your second factor: "
 
